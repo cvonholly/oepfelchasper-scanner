@@ -7,6 +7,14 @@ export default {
       try {
         const body = await request.json();
         const base64Image = body.image;
+        const userPasscode = body.passcode; // 1. Catch the passcode from the frontend
+
+        // 2. Security Check: Does it match the secret?
+        if (env.APP_PASSCODE && userPasscode !== env.APP_PASSCODE) {
+          return new Response(JSON.stringify({ error: "Incorrect passcode. Access denied." }), { 
+            status: 401, headers: { 'Content-Type': 'application/json' } 
+          });
+        }
 
         if (!base64Image) {
           return new Response(JSON.stringify({ error: "No image provided" }), { 
@@ -32,7 +40,7 @@ export default {
 
         if (!visionResponse.ok) {
           const errorDetails = await visionResponse.text();
-          console.error("Google Vision API Error:", errorDetails); // Logs to your terminal
+          console.error("Google Vision API Error:", errorDetails); 
           throw new Error(`Google API Error (${visionResponse.status}): ${errorDetails}`);
         }
 
@@ -60,7 +68,7 @@ export default {
             parts: [{ text: rawText }]
           }],
           generationConfig: {
-            response_mime_type: "application/json", // This guarantees clean JSON output
+            response_mime_type: "application/json", 
             temperature: 0.1
           }
         };
@@ -80,10 +88,7 @@ export default {
         let addresses = [];
         
         try {
-          // Extract the guaranteed JSON string from the response
           const content = aiData.candidates[0].content.parts[0].text;
-          
-          // Parse directly into a JavaScript array
           addresses = JSON.parse(content);
 
           if (!Array.isArray(addresses) || addresses.length === 0) {
@@ -109,14 +114,6 @@ export default {
       }
     }
 
-    // Route: Backend API (We will build this next)
-    if (url.pathname === '/api/scan' && request.method === 'POST') {
-      return new Response(JSON.stringify({ error: "Backend not yet implemented" }), { 
-        status: 501,
-        headers: { 'Content-Type': 'application/json' }
-      });
-    }
-
     // Route: Serve the Frontend HTML
     const html = `
     <!DOCTYPE html>
@@ -131,9 +128,13 @@ export default {
         .btn {
           display: inline-block; background: #007bff; color: white;
           padding: 15px 30px; font-size: 1.2rem; border-radius: 8px;
-          cursor: pointer; font-weight: bold; margin-top: 20px;
+          cursor: pointer; font-weight: bold; margin-top: 10px;
         }
-        /* Hide the ugly default file input */
+        /* Passcode input styling */
+        .passcode-box {
+          padding: 12px; font-size: 1.1rem; border-radius: 8px; border: 1px solid #ccc;
+          margin-bottom: 15px; width: 80%; max-width: 250px; text-align: center;
+        }
         #cameraInput { display: none; }
         #status { margin-top: 20px; font-size: 1rem; color: #555; }
         #routes { margin-top: 16px; max-width: 720px; margin-left: auto; margin-right: auto; text-align: center; }
@@ -148,6 +149,8 @@ export default {
       <h1>🍏🍎🍏Öpfelchasper Route Planner🍎🍏🍎</h1>
       <p>Take a photo of your ordered address list to generate a route.</p>
 
+      <input type="password" id="passcodeInput" class="passcode-box" placeholder="Enter Passcode"><br>
+
       <label for="cameraInput" class="btn">📸 Open Camera</label>
       <input type="file" accept="image/*" capture="environment" id="cameraInput">
 
@@ -157,6 +160,7 @@ export default {
 
       <script>
         const cameraInput = document.getElementById('cameraInput');
+        const passcodeInput = document.getElementById('passcodeInput'); // Get passcode element
         const statusDiv = document.getElementById('status');
         const loader = document.getElementById('loader');
         const routesDiv = document.getElementById('routes');
@@ -174,34 +178,44 @@ export default {
         function createMapsUrl(routeAddresses) {
           const origin = encodeURIComponent(routeAddresses[0]);
           const destination = encodeURIComponent(routeAddresses[routeAddresses.length - 1]);
-          const waypoints = routeAddresses.slice(1, -1).map(encodeURIComponent).join('|');
-          return \`https://www.google.com/maps/dir/?api=1&origin=\${origin}&destination=\${destination}&waypoints=\${waypoints}\`;
+          const waypoints = routeAddresses.slice(1, -1).map(encodeURIComponent).join('%7C'); // %7C is safe encoded pipe
+          
+          // Fixed the URL to use string concatenation to avoid template literal bugs
+          return "https://www.google.com/maps/dir/?api=1&origin=" + origin + "&destination=" + destination + "&waypoints=" + waypoints;
         }
 
         cameraInput.addEventListener('change', async (event) => {
           const file = event.target.files[0];
           if (!file) return;
 
+          const passcodeValue = passcodeInput.value.trim();
+          
+          // Force user to type passcode before processing
+          if (!passcodeValue) {
+            alert("Please enter the passcode first!");
+            event.target.value = ''; // Reset the file input
+            return;
+          }
+
           // Update UI
           statusDiv.innerText = "Reading image...";
           routesDiv.innerHTML = "";
           loader.style.display = "block";
 
-          // Convert image to Base64 to send to our Worker API
           const reader = new FileReader();
           reader.readAsDataURL(file);
           
           reader.onload = async () => {
-            const base64Image = reader.result.split(',')[1]; // Strip the data URL prefix
+            const base64Image = reader.result.split(',')[1]; 
 
             try {
               statusDiv.innerText = "Analyzing addresses... this takes a few seconds.";
               
-              // Send to our Cloudflare Worker backend
               const response = await fetch('/api/scan', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ image: base64Image })
+                // Include the passcode in the JSON payload!
+                body: JSON.stringify({ image: base64Image, passcode: passcodeValue })
               });
 
               const data = await response.json();
@@ -212,7 +226,6 @@ export default {
 
               statusDiv.innerText = "Success! Opening Google Maps...";
               
-              // Split into route chunks so each route has at most MAX_STOPS_PER_ROUTE stops.
               const addresses = data.addresses;
               if (addresses && addresses.length >= 2) {
                 const routeChunks = chunkAddresses(addresses, MAX_STOPS_PER_ROUTE);
@@ -232,9 +245,9 @@ export default {
                   return;
                 }
 
-                statusDiv.innerText = \`Found \${addresses.length} addresses. Split into \${routeUrls.length} routes (max \${MAX_STOPS_PER_ROUTE} stops each). Open each route below.\`;
+                statusDiv.innerText = "Found " + addresses.length + " addresses. Split into " + routeUrls.length + " routes. Open each route below.";
                 routesDiv.innerHTML = routeUrls
-                  .map((url, index) => \`<a href="\${url}" target="_blank" rel="noopener noreferrer">Open Route \${index + 1}</a>\`)
+                  .map((url, index) => '<a href="' + url + '" target="_blank" rel="noopener noreferrer">Open Route ' + (index + 1) + '</a>')
                   .join('');
                 loader.style.display = "none";
               } else {
