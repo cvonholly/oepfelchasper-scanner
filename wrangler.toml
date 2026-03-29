@@ -1,3 +1,6 @@
 name = "the-builder" # You can change this to whatever you want
 main = "worker.js"         # This tells Cloudflare where your code is
 compatibility_date = "2026-03-29"
+routes = [
+  { pattern = "oepfel.cvonholly.cc", custom_domain = true }
+]
