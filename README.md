@@ -1,6 +1,6 @@
 # 🗺️📸 Route Scanner
 
-This is a personal project combining my passion as a Velokurier for Öpfelchasper and innovative software application.
+This is a personal project combining my passion as a Velokurier for Öpfelchasper and innovative software application. A Blog Post on the project is available [here](https://cvonholly.cc/blog/oepfelchasper-tracker/).
 
 A lightweight, serverless web application that allows users to snap a photo of a printed list of addresses and instantly generate an ordered, multi-stop Google Maps route. 
 
